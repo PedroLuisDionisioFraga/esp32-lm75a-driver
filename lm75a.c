@@ -1,0 +1,340 @@
+/**
+ * @file lm75a.c
+ * @brief ESP32 Driver for LM75A Temperature Sensor (Updated with new I2C API)
+ * @version 0.2
+ * @date 2024-12-23
+ * @author Pedro Luis Dionísio Fraga
+ * @copyright Copyright (c) 2024
+ */
+
+#include "lm75a.h"
+
+#include <driver/gpio.h>
+#include <driver/i2c_master.h>
+#include <esp_intr_alloc.h>
+#include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+//==================== CONFIGURATIONS ====================//
+
+#define BASE_LM75A_DEV_ADDR 0b1001                                // Base I2C address for LM75A
+#define LM75A_DEV_ADDR      ((BASE_LM75A_DEV_ADDR << 3) | 0b000)  // Final I2C address
+
+#define LM75A_TEMP_REG    0x00  // Temperature register
+#define LM75A_CONF_REG    0x01  // Configuration register
+#define LM75A_THYST_REG   0x02  // Hysteresis register
+#define LM75A_TOS_REG     0x03  // Overtemperature shutdown register
+#define LM75A_PROD_ID_REG 0x07  // Manufacturer ID register
+
+// Configuration Bits
+#define LM75A_SHUTDOWN_BIT (1 << 0)  // Shutdown Mode
+#define LM75A_OS_MODE_BIT  (1 << 1)  // OS Mode (Comparator/Interrupt)
+#define LM75A_OS_POL_BIT   (1 << 2)  // OS Polarity (Active Low/High)
+
+#define ESP_INTR_FLAG_DEFAULT 0
+
+#define DEFAULT_GLITCH_FILTER 7
+// Helper to detect half-degree bit
+#define LM75A_HALF_DEGREE_MASK 0x80
+
+#define LM75A_WAIT_READ_FOREVER -1
+
+// Macros
+#define DEV_NOT_INIT(self, ret)                     \
+  if (!(s_lm75a_device) || !(s_i2c_bus) || !(self)) \
+  {                                                 \
+    ESP_LOGE(TAG, "Device not initialized!");       \
+    return ret;                                     \
+  }
+
+static const char *TAG = "LM75A";
+
+static i2c_master_bus_handle_t s_i2c_bus = NULL;
+static i2c_master_dev_handle_t s_lm75a_device = NULL;
+
+//==================== I2C INITIALIZATION ====================//
+static esp_err_t i2c_master_init(lm75a_config_t *cfg)
+{
+  i2c_master_bus_config_t bus_config = {
+    .clk_source = I2C_CLK_SRC_DEFAULT,  // Clock source for I2C peripheral
+    .i2c_port = cfg->i2c_port,
+    .scl_io_num = cfg->master_scl_pin,
+    .sda_io_num = cfg->master_sda_pin,
+    .glitch_ignore_cnt = DEFAULT_GLITCH_FILTER,  // Filter out short glitches (default 7)
+    .flags.enable_internal_pullup = true,        // Enable internal pull-up resistors
+  };
+
+  // TODO: Add a personalized error code to return
+  ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &s_i2c_bus));
+
+  i2c_device_config_t device_config = {
+    .dev_addr_length = I2C_ADDR_BIT_LEN_7,  // 7-bit I2C address
+    .device_address = cfg->address,
+    .scl_speed_hz = cfg->i2c_frequency,
+  };
+
+  // TODO: Add a personalized error code to return
+  ESP_ERROR_CHECK(i2c_master_bus_add_device(s_i2c_bus, &device_config, &s_lm75a_device));
+
+  return ESP_OK;
+}
+
+esp_err_t lm75a_init(lm75a_t *self)
+{
+  if (!self)
+    return ESP_ERR_INVALID_ARG;
+
+  ESP_LOGI(TAG, "Initializing LM75A...");
+  i2c_master_init(&self->config);
+
+  // Create a task to debug the interrupt
+  ESP_LOGI(TAG, "LM75A initialized.");
+
+  return ESP_OK;
+}
+
+float lm75a_read_temperature(lm75a_t *self)
+{
+  DEV_NOT_INIT(self, -273.0f);
+
+  uint8_t temp_reg = LM75A_TEMP_REG;
+  uint8_t data[2] = {0};
+
+  // Perform I2C read transaction
+  esp_err_t ret = i2c_master_transmit_receive(s_lm75a_device, &temp_reg, sizeof(temp_reg), data,
+                                              sizeof(data), LM75A_WAIT_READ_FOREVER);
+  if (ret != ESP_OK)
+  {
+    ESP_LOGE(TAG, "I2C Read failed: %s", esp_err_to_name(ret));
+    return -100.0f;  // Error value
+  }
+
+  // Process the temperature data (9-bit two's complement format)
+  int16_t raw_temp = (data[0] << 8) | data[1];
+  ESP_LOGW(TAG, "Raw Temp: 0x%04X", raw_temp);
+  raw_temp >>= 7;
+
+  return raw_temp * 0.5;  // Converting to Celsius
+}
+
+void lm75a_set_shutdown(lm75a_t *self, bool enable)
+{
+  uint8_t buf[2] = {0};
+  buf[0] = LM75A_CONF_REG;
+  buf[1] = ((uint8_t)enable & 0x01) ? (LM75A_SHUTDOWN_BIT)
+                                    : 0;  // (if not works, put the `<< 1` outside the parenthesis)
+
+  esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
+  if (ret == ESP_OK)
+    ESP_LOGI(TAG, "Shutdown %s", enable ? "enabled" : "disabled");
+  else
+    ESP_LOGE(TAG, "Failed to set shutdown: %s", esp_err_to_name(ret));
+}
+
+void lm75a_set_os_mode(lm75a_t *self, lm75a_os_mode_t mode)
+{
+  // DEV_NOT_INIT(self, NULL);
+
+  uint8_t buf[2] = {0};
+  buf[0] = LM75A_CONF_REG;
+  buf[1] = ((uint8_t)mode & 0x01) ? LM75A_OS_MODE_BIT
+                                  : 0;  // `&` operation OS_MODE is 0 or 1 preventing invalid data.
+
+  esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
+  if (ret == ESP_OK)
+    ESP_LOGI(TAG, "OS set to %s Mode", mode == 0 ? "Comparator" : "Interrupt");
+  else
+    ESP_LOGE(TAG, "Failed to set OS mode: %s", esp_err_to_name(ret));
+}
+
+void lm75a_set_polarity(lm75a_t *self, lm75a_os_polarity_t pol)
+{
+  // DEV_NOT_INIT(self, NULL);
+
+  uint8_t buf[2] = {0};
+  buf[0] = LM75A_CONF_REG;
+  buf[1] = ((uint8_t)pol & 0x01) ? LM75A_OS_POL_BIT : 0;
+
+  esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
+  if (ret == ESP_OK)
+    ESP_LOGI(TAG, "OS Polarity set to %s", pol == 0 ? "Low" : "High");
+  else
+    ESP_LOGE(TAG, "Failed to set OS polarity: %s", esp_err_to_name(ret));
+}
+
+void lm75a_set_fault_queue(lm75a_t *self, lm75a_fault_queue_t fault_queue)
+{
+  // DEV_NOT_INIT(self, NULL);
+
+  uint8_t buf[2] = {0};
+  buf[0] = LM75A_CONF_REG;
+  buf[1] = ((uint8_t)fault_queue & 0x03) << 3;  // `0x03` is the mask for the 2 LSBs
+
+  esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
+  if (ret == ESP_OK)
+    ESP_LOGI(TAG, "Fault Queue set to %d", fault_queue);
+  else
+    ESP_LOGE(TAG, "Failed to set Fault Queue: %s", esp_err_to_name(ret));
+}
+
+void lm75a_set_tos(lm75a_t *self, int tos)
+{
+  // DEV_NOT_INIT(self, NULL);
+
+  (void)self;  // Unused because the struct not contains a `tos` field
+
+  uint8_t buf[2] = {0};
+  buf[0] = LM75A_TOS_REG;
+  buf[1] = tos & 0xFF;
+  //? If not works, change `buf` length to 3 and add `buf[2] = 0x00;`
+
+  esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
+  if (ret == ESP_OK)
+    ESP_LOGI(TAG, "TOS set to %d°C", tos);
+  else
+    ESP_LOGE(TAG, "Failed to set TOS: %s", esp_err_to_name(ret));
+}
+
+void lm75a_set_thys(lm75a_t *self, int thys)
+{
+  // DEV_NOT_INIT(self, NULL);
+
+  uint8_t buf[2] = {0};
+  buf[0] = LM75A_THYST_REG;
+  buf[1] = thys & 0xFF;
+  //? If not works, change `buf` length to 3 and add `buf[2] = 0x00;`
+
+  esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
+  if (ret == ESP_OK)
+    ESP_LOGI(TAG, "THYST set to %d°C", thys);
+  else
+    ESP_LOGE(TAG, "Failed to set THYST: %s", esp_err_to_name(ret));
+}
+
+float lm75a_get_tos(lm75a_t *self)
+{
+  DEV_NOT_INIT(self, -1);
+
+  uint8_t reg = LM75A_TOS_REG;
+  uint8_t buf[2] = {0};
+
+  esp_err_t ret = i2c_master_transmit_receive(s_lm75a_device, &reg, sizeof(reg), buf, sizeof(buf),
+                                              LM75A_WAIT_READ_FOREVER);
+  if (ret == ESP_OK)
+  {
+    float tos = buf[0];
+    if (buf[1] & LM75A_HALF_DEGREE_MASK)
+      tos += 0.5;
+
+    ESP_LOGI(TAG, "TOS Threshold: %.1f°C", tos);
+    return tos;
+  }
+  else
+  {
+    ESP_LOGE(TAG, "Failed to read TOS: %s", esp_err_to_name(ret));
+    return -1;
+  }
+}
+
+float lm75a_get_thys(lm75a_t *self)
+{
+  DEV_NOT_INIT(self, -1);
+
+  uint8_t reg = LM75A_THYST_REG;
+  uint8_t buf[2] = {0};
+
+  esp_err_t ret = i2c_master_transmit_receive(s_lm75a_device, &reg, sizeof(reg), buf, sizeof(buf),
+                                              LM75A_WAIT_READ_FOREVER);
+  if (ret == ESP_OK)
+  {
+    float thys = buf[0];
+    // If the least significant bit (LSB) of the temperature data, which represents 0.5°C, around up
+    // the number. It uses the 0x80 bit because D0–D6 is undefined.
+    if (buf[1] & LM75A_HALF_DEGREE_MASK)
+      thys += 0.5;
+    ESP_LOGI(TAG, "THYST Threshold: %.1f°C", thys);
+    return thys;
+  }
+  else
+  {
+    ESP_LOGE(TAG, "Failed to read THYST: %s", esp_err_to_name(ret));
+    return -1;
+  }
+}
+
+//! Not working yet
+int lm75a_get_product_id(lm75a_t *self)
+{
+  // uint8_t product_id = 0;
+  // i2c_master_transmit_receive(s_lm75a_device, (uint8_t[]){LM75A_PROD_ID_REG}, 1, &product_id, 1,
+  // -1); return product_id;
+  return -1;
+}
+
+void lm75a_set_os_interrupt(lm75a_t *self, lm75a_os_cb_t cb, void *arg)
+{
+  gpio_num_t pin = self->config.os_pin;
+
+  gpio_config_t os_conf = {.pin_bit_mask = (1ULL << pin),
+                           .mode = GPIO_MODE_INPUT,
+                           .pull_up_en = GPIO_PULLUP_ENABLE,
+                           .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                           .intr_type = GPIO_INTR_ANYEDGE};
+  gpio_config(&os_conf);
+
+  // Install GPIO ISR service
+  gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+
+  // Attach interrupt handler
+  gpio_isr_handler_add(pin, cb, arg);
+
+  ESP_LOGI(TAG, "OS interrupt initialized on GPIO%d", pin);
+}
+
+lm75a_t *lm75a_create(lm75a_config_t config)
+{
+  lm75a_t *lm75a = (lm75a_t *)malloc(sizeof(lm75a_t));
+  if (!lm75a)
+  {
+    ESP_LOGE(TAG, "Failed to allocate memory for LM75A");
+    return NULL;
+  }
+
+  lm75a->config = config;
+  lm75a->os_cb = NULL;
+  lm75a->os_cb_arg = NULL;
+
+  lm75a->init = lm75a_init;
+  lm75a->read_temperature = lm75a_read_temperature;
+  lm75a->set_os_mode = lm75a_set_os_mode;
+  lm75a->set_shutdown = lm75a_set_shutdown;
+  lm75a->set_polarity = lm75a_set_polarity;
+  lm75a->set_fault_queue = lm75a_set_fault_queue;
+  lm75a->set_tos = lm75a_set_tos;
+  lm75a->set_thys = lm75a_set_thys;
+  lm75a->get_tos = lm75a_get_tos;
+  lm75a->get_thys = lm75a_get_thys;
+  lm75a->get_product_id = lm75a_get_product_id;
+  lm75a->set_os_interrupt = lm75a_set_os_interrupt;
+
+  return lm75a;
+}
+
+void lm75a_destroy(lm75a_t *self)
+{
+  if (!self)
+    return;
+
+  i2c_master_bus_rm_device(s_lm75a_device);
+  i2c_del_master_bus(s_i2c_bus);
+  gpio_isr_handler_remove(self->config.os_pin);
+  gpio_reset_pin(self->config.os_pin);
+  free(self);
+  self = NULL;
+
+  ESP_LOGI(TAG, "LM75A deinitialized successfully.");
+}
