@@ -162,20 +162,18 @@ lm75a_status_t lm75a_set_shutdown(lm75a_t *self, bool enable)
   return (ret == ESP_OK) ? LM75A_OK : LM75A_ERR_I2C_WRITE;
 }
 
-void lm75a_set_os_mode(lm75a_t *self, lm75a_os_mode_t mode)
+lm75a_status_t lm75a_set_os_mode(lm75a_t *self, lm75a_os_mode_t mode)
 {
-  // DEV_NOT_INIT(self, NULL);
+  LM75A_CHECK_INSTANCE(self, LM75A_ERR_INVALID_PARAM);
 
   uint8_t buf[2] = {0};
   buf[0] = LM75A_CONF_REG;
   buf[1] = ((uint8_t)mode & 0x01) ? LM75A_OS_MODE_BIT
                                   : 0;  // `&` operation OS_MODE is 0 or 1 preventing invalid data.
 
+  LM75A_CHECK_INSTANCE(s_lm75a_device, LM75A_ERR_DEV_HANDLE);
   esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
-  if (ret == ESP_OK)
-    ESP_LOGI(TAG, "OS set to %s Mode", mode == 0 ? "Comparator" : "Interrupt");
-  else
-    ESP_LOGE(TAG, "Failed to set OS mode: %s", esp_err_to_name(ret));
+  return (ret == ESP_OK) ? LM75A_OK : LM75A_ERR_I2C_WRITE;
 }
 
 void lm75a_set_polarity(lm75a_t *self, lm75a_os_polarity_t pol)
