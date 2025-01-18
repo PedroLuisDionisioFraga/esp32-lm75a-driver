@@ -103,31 +103,51 @@ lm75a_status_t lm75a_init(lm75a_t *self)
   return (i2c_master_init(&self->config) != ESP_OK) ? LM75A_ERR_I2C_INIT : LM75A_OK;
 }
 
-float lm75a_read_temperature(lm75a_t *self)
+lm75a_status_t lm75a_read_temperature(lm75a_t *self, float *out_temp, lm75a_scale_t scale)
 {
-  DEV_NOT_INIT(self, -273.0f);
+  LM75A_CHECK_INSTANCE(self, LM75A_ERR_INVALID_PARAM);
+  LM75A_CHECK_INSTANCE(out_temp, LM75A_ERR_INVALID_PARAM);
 
   uint8_t temp_reg = LM75A_TEMP_REG;
   uint8_t data[2] = {0};
 
-  // Perform I2C read transaction
-  esp_err_t ret = i2c_master_transmit_receive(s_lm75a_device, &temp_reg, sizeof(temp_reg), data,
-                                              sizeof(data), LM75A_WAIT_READ_FOREVER);
+  esp_err_t ret = i2c_master_transmit_receive(s_lm75a_device,
+                                              &temp_reg,
+                                              sizeof(temp_reg),
+                                              data,
+                                              sizeof(data),
+                                              LM75A_WAIT_READ_FOREVER);
   if (ret != ESP_OK)
-  {
-    ESP_LOGE(TAG, "I2C Read failed: %s", esp_err_to_name(ret));
-    return -100.0f;  // Error value
-  }
+    return LM75A_ERR_READ_TEMP;
 
   // Process the temperature data (9-bit two's complement format)
   int16_t raw_temp = (data[0] << 8) | data[1];
-  ESP_LOGW(TAG, "Raw Temp: 0x%04X", raw_temp);
   raw_temp >>= 7;
 
-  return raw_temp * 0.5;  // Converting to Celsius
+  // Verify if the temperature is negative
+  float celsius;
+  celsius = raw_temp * 0.5f;
+  if (raw_temp & LM75A_SIGNAL_BIT)
+    celsius = -celsius;
+
+  switch (scale)
+  {
+    case LM75A_SCALE_FAHRENHEIT:
+      *out_temp = (celsius * 9 / 5) + 32;
+      break;
+    case LM75A_SCALE_KELVIN:
+      *out_temp = celsius + 273.15;
+      break;
+    case LM75A_SCALE_CELSIUS:
+    default:
+      *out_temp = celsius;
+      break;
+  }
+
+  return LM75A_OK;
 }
 
-void lm75a_set_shutdown(lm75a_t *self, bool enable)
+lm75a_status_t lm75a_set_shutdown(lm75a_t *self, bool enable)
 {
   uint8_t buf[2] = {0};
   buf[0] = LM75A_CONF_REG;
