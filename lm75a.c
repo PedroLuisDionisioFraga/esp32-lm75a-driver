@@ -188,19 +188,16 @@ lm75a_status_t lm75a_set_polarity(lm75a_t *self, lm75a_os_polarity_t pol)
   return (ret != ESP_OK) ? LM75A_OK : LM75A_ERR_I2C_WRITE;
 }
 
-void lm75a_set_fault_queue(lm75a_t *self, lm75a_fault_queue_t fault_queue)
+lm75a_status_t lm75a_set_fault_queue(lm75a_t *self, lm75a_fault_queue_t fault_queue)
 {
-  // DEV_NOT_INIT(self, NULL);
+  LM75A_CHECK_INSTANCE(self, LM75A_ERR_INVALID_PARAM);
 
   uint8_t buf[2] = {0};
   buf[0] = LM75A_CONF_REG;
-  buf[1] = ((uint8_t)fault_queue & 0x03) << 3;  // `0x03` is the mask for the 2 LSBs
+  buf[1] = ((uint8_t)fault_queue & 0x03) << 0x03;  // The second `0x03` is the mask for the 2 LSBs
 
   esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
-  if (ret == ESP_OK)
-    ESP_LOGI(TAG, "Fault Queue set to %d", fault_queue);
-  else
-    ESP_LOGE(TAG, "Failed to set Fault Queue: %s", esp_err_to_name(ret));
+  return (ret == ESP_OK) ? LM75A_OK : LM75A_ERR_I2C_WRITE;
 }
 
 void lm75a_set_tos(lm75a_t *self, int tos)
