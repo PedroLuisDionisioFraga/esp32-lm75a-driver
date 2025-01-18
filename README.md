@@ -112,6 +112,10 @@ To read the temperature:
 - Multiply by 0.5 to get the temperature in Celsius.
 
 
+## Future Works
+- [ ] Test with negative temperature values, i.e., submit the sensor to a cold environment and verify if the measures (read_temperature) and the triggers ($T_{OS}$, $T_{HYST}$) are working properly.
+
+
 ## References
 1. [LM75A open source - 13xiaobang](https://github.com/13xiaobang/esp32_lm75a/tree/master/main)
 2. [LM75A open source - UncleRus](https://github.com/UncleRus/esp-idf-lib/tree/master/components/lm75)
