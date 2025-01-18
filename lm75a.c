@@ -322,7 +322,7 @@ lm75a_status_t lm75a_get_product_id(lm75a_t *self, int *out_product)
   return LM75A_ERR_UNKNOWN;
 }
 
-void lm75a_set_os_interrupt(lm75a_t *self, lm75a_os_cb_t cb, void *arg)
+lm75a_status_t lm75a_set_os_interrupt(lm75a_t *self, lm75a_os_cb_t cb, void *arg)
 {
   gpio_num_t pin = self->config.os_pin;
 
@@ -331,25 +331,28 @@ void lm75a_set_os_interrupt(lm75a_t *self, lm75a_os_cb_t cb, void *arg)
                            .pull_up_en = GPIO_PULLUP_ENABLE,
                            .pull_down_en = GPIO_PULLDOWN_DISABLE,
                            .intr_type = GPIO_INTR_ANYEDGE};
-  gpio_config(&os_conf);
 
-  // Install GPIO ISR service
-  gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+  esp_err_t ret;
 
-  // Attach interrupt handler
-  gpio_isr_handler_add(pin, cb, arg);
+  ret = gpio_config(&os_conf);
+  if (ret != ESP_OK)
+    return LM75A_ERR_GPIO_CONFIG;
 
-  ESP_LOGI(TAG, "OS interrupt initialized on GPIO%d", pin);
+  ret = gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+  if (ret != ESP_OK)
+    return LM75A_ERR_ISR_INSTALL;
+
+  ret = gpio_isr_handler_add(pin, cb, arg);
+  if (ret != ESP_OK)
+    return LM75A_ERR_ISR_INSTALL;
+
+  return LM75A_OK;
 }
 
 lm75a_t *lm75a_create(lm75a_config_t config)
 {
   lm75a_t *lm75a = (lm75a_t *)malloc(sizeof(lm75a_t));
-  if (!lm75a)
-  {
-    ESP_LOGE(TAG, "Failed to allocate memory for LM75A");
-    return NULL;
-  }
+  LM75A_CHECK_INSTANCE(lm75a, NULL);
 
   lm75a->config = config;
   lm75a->os_cb = NULL;
@@ -371,17 +374,49 @@ lm75a_t *lm75a_create(lm75a_config_t config)
   return lm75a;
 }
 
-void lm75a_destroy(lm75a_t *self)
+lm75a_status_t lm75a_destroy(lm75a_t *self)
 {
-  if (!self)
-    return;
+  LM75A_CHECK_INSTANCE(self, LM75A_ERR_INVALID_PARAM);
 
-  i2c_master_bus_rm_device(s_lm75a_device);
-  i2c_del_master_bus(s_i2c_bus);
-  gpio_isr_handler_remove(self->config.os_pin);
-  gpio_reset_pin(self->config.os_pin);
+  ESP_ERROR_CHECK(i2c_master_bus_rm_device(s_lm75a_device));
+  ESP_ERROR_CHECK(i2c_del_master_bus(s_i2c_bus));
+  ESP_ERROR_CHECK(gpio_isr_handler_remove(self->config.os_pin));
+  ESP_ERROR_CHECK(gpio_reset_pin(self->config.os_pin));
   free(self);
   self = NULL;
 
-  ESP_LOGI(TAG, "LM75A deinitialized successfully.");
+  return LM75A_OK;
+}
+
+char *lm75a_status_to_string(lm75a_status_t status)
+{
+  switch (status)
+  {
+    case LM75A_OK:
+      return "Operation successful";
+    case LM75A_ERR_I2C_INIT:
+      return "I2C initialization failed";
+    case LM75A_ERR_I2C_DEV_ADD:
+      return "Failed to add LM75A device to the I2C bus";
+    case LM75A_ERR_I2C_WRITE:
+      return "I2C write operation failed";
+    case LM75A_ERR_I2C_READ:
+      return "I2C read operation failed";
+    case LM75A_ERR_DEV_HANDLE:
+      return "Device handle is NULL";
+    case LM75A_ERR_READ_TEMP:
+      return "Failed to read temperature";
+    case LM75A_ERR_INVALID_PARAM:
+      return "Invalid parameter passed";
+    case LM75A_ERR_GPIO_CONFIG:
+      return "GPIO configuration failed";
+    case LM75A_ERR_ISR_INSTALL:
+      return "ISR installation failed";
+    case LM75A_ERR_NO_MEM:
+      return "Memory allocation failed";
+    case LM75A_ERR_UNKNOWN:
+      return "Unknown error";
+    default:
+      return "Invalid status code";
+  }
 }
