@@ -222,20 +222,24 @@ lm75a_status_t lm75a_set_tos(lm75a_t *self, int16_t tos, bool add_half_degree)
   return (ret == ESP_OK) ? LM75A_OK : LM75A_ERR_I2C_WRITE;
 }
 
-void lm75a_set_thys(lm75a_t *self, int thys)
+lm75a_status_t lm75a_set_thys(lm75a_t *self, int16_t thys, bool add_half_degree)
 {
-  // DEV_NOT_INIT(self, NULL);
+  LM75A_CHECK_INSTANCE(self, LM75A_ERR_INVALID_PARAM);
 
-  uint8_t buf[2] = {0};
+  uint8_t buf[3] = {0};
   buf[0] = LM75A_THYST_REG;
-  buf[1] = thys & 0xFF;
-  //? If not works, change `buf` length to 3 and add `buf[2] = 0x00;`
+
+  if (thys < 0)
+  {
+    thys = -thys;
+    buf[1] = (thys & 0xFF) | (1 << 7);
+  }
+  else
+    buf[1] = (thys & 0xFF);
+  buf[2] = add_half_degree ? LM75A_HALF_DEGREE_MASK : 0x00;
 
   esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
-  if (ret == ESP_OK)
-    ESP_LOGI(TAG, "THYST set to %d°C", thys);
-  else
-    ESP_LOGE(TAG, "Failed to set THYST: %s", esp_err_to_name(ret));
+  return (ret == ESP_OK) ? LM75A_OK : LM75A_ERR_I2C_WRITE;
 }
 
 float lm75a_get_tos(lm75a_t *self)
