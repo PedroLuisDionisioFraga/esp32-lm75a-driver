@@ -314,12 +314,12 @@ lm75a_status_t lm75a_get_thys(lm75a_t *self, float *out_thys)
 }
 
 //! Not working yet
-int lm75a_get_product_id(lm75a_t *self)
+lm75a_status_t lm75a_get_product_id(lm75a_t *self, int *out_product)
 {
   // uint8_t product_id = 0;
   // i2c_master_transmit_receive(s_lm75a_device, (uint8_t[]){LM75A_PROD_ID_REG}, 1, &product_id, 1,
   // -1); return product_id;
-  return -1;
+  return LM75A_ERR_UNKNOWN;
 }
 
 void lm75a_set_os_interrupt(lm75a_t *self, lm75a_os_cb_t cb, void *arg)
