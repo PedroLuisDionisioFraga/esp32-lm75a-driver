@@ -242,32 +242,43 @@ lm75a_status_t lm75a_set_thys(lm75a_t *self, int16_t thys, bool add_half_degree)
   return (ret == ESP_OK) ? LM75A_OK : LM75A_ERR_I2C_WRITE;
 }
 
-float lm75a_get_tos(lm75a_t *self)
+lm75a_status_t lm75a_get_tos(lm75a_t *self, float *out_tos)
 {
-  DEV_NOT_INIT(self, -1);
+  LM75A_CHECK_INSTANCE(self, LM75A_ERR_INVALID_PARAM);
 
   uint8_t reg = LM75A_TOS_REG;
   uint8_t buf[2] = {0};
 
-  esp_err_t ret = i2c_master_transmit_receive(s_lm75a_device, &reg, sizeof(reg), buf, sizeof(buf),
+  esp_err_t ret = i2c_master_transmit_receive(s_lm75a_device,
+                                              &reg,
+                                              sizeof(reg),
+                                              buf,
+                                              sizeof(buf),
                                               LM75A_WAIT_READ_FOREVER);
-  if (ret == ESP_OK)
-  {
-    float tos = buf[0];
-    if (buf[1] & LM75A_HALF_DEGREE_MASK)
-      tos += 0.5;
+  if (ret != ESP_OK)
+    return LM75A_ERR_I2C_READ;
 
-    ESP_LOGI(TAG, "TOS Threshold: %.1f°C", tos);
-    return tos;
-  }
-  else
+  uint16_t raw_tos = (buf[0] << 8) | buf[1];
+  raw_tos >>= 7;
+  ESP_LOGW(TAG, "raw_tos: 0x%04X", raw_tos);
+
+  // If the least significant bit (LSB) of the temperature data, which represents 0.5°C, around up
+  // the number. It uses the 0x80 bit because D0–D6 is undefined.
+  float tos;
+  tos = raw_tos * 0.5;
+
+  if (raw_tos & LM75A_SIGNAL_BIT)
   {
-    ESP_LOGE(TAG, "Failed to read TOS: %s", esp_err_to_name(ret));
-    return -1;
+    raw_tos &= ~LM75A_SIGNAL_BIT;
+    tos = -(raw_tos * 0.5);
   }
+
+  *out_tos = tos;
+
+  return LM75A_OK;
 }
 
-float lm75a_get_thys(lm75a_t *self)
+lm75a_status_t lm75a_get_thys(lm75a_t *self, float *out_thys)
 {
   DEV_NOT_INIT(self, -1);
 
