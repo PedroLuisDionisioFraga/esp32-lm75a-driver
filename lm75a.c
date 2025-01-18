@@ -20,7 +20,6 @@
 #include <string.h>
 
 //==================== CONFIGURATIONS ====================//
-
 #define BASE_LM75A_DEV_ADDR 0b1001                                // Base I2C address for LM75A
 #define LM75A_DEV_ADDR      ((BASE_LM75A_DEV_ADDR << 3) | 0b000)  // Final I2C address
 
@@ -39,17 +38,30 @@
 
 #define DEFAULT_GLITCH_FILTER 7
 // Helper to detect half-degree bit
-#define LM75A_HALF_DEGREE_MASK 0x80
+#define LM75A_MSB_BIT_IN_BYTE  0x80
+#define LM75A_HALF_DEGREE_MASK (1 << 7)
+#define LM75A_SIGNAL_BIT       (1 << 8)  // 1 if negative, 0 if positive
 
 #define LM75A_WAIT_READ_FOREVER -1
 
+#define DEBUG 1
+
 // Macros
-#define DEV_NOT_INIT(self, ret)                     \
-  if (!(s_lm75a_device) || !(s_i2c_bus) || !(self)) \
-  {                                                 \
-    ESP_LOGE(TAG, "Device not initialized!");       \
-    return ret;                                     \
+#define DEBUG_PRINT_ERR(fmt, ...)        \
+  do                                     \
+  {                                      \
+    if (DEBUG)                           \
+      ESP_LOGE(TAG, fmt, ##__VA_ARGS__); \
+  } while (0)
+
+#define LM75A_CHECK_INSTANCE(evaluated, ret)           \
+  if (!evaluated)                                      \
+  {                                                    \
+    DEBUG_PRINT_ERR("Error: LM75A_ERR_INVALID_PARAM"); \
+    return ret;                                        \
   }
+
+#define UNUSED(x) (void)(x)
 
 static const char *TAG = "LM75A";
 
