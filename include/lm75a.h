@@ -133,14 +133,6 @@ extern "C"
      *
      * @param[in] self Pointer to driver instance.
      * @param[in] tos  Threshold in °C.
-     */
-    lm75a_status_t (*set_tos)(struct lm75a *self, int16_t tos, bool add_half_degree);
-
-    /**
-     * @brief Set Overtemperature Shutdown threshold (TOS).
-     *
-     * @param[in] self Pointer to driver instance.
-     * @param[in] tos  Threshold in °C.
      * @param[in] add_half_degree Boolean to add 0.5°C to the threshold.
      * @return lm75a_status_t Custom driver status.
      */
@@ -155,6 +147,16 @@ extern "C"
      * @return lm75a_status_t Custom driver status.
      */
     lm75a_status_t (*set_thys)(struct lm75a *self, int16_t thys, bool add_half_degree);
+
+    /**
+     * @brief Read the current TOS (Overtemperature) threshold.
+     *
+     * @param[in]  self     Pointer to driver instance.
+     * @param[out] out_tos  Where the TOS value (°C) is stored.
+     *
+     * @return lm75a_status_t Custom driver status.
+     */
+    lm75a_status_t (*get_tos)(struct lm75a *self, float *out_tos);
 
     /**
      * @brief Read the current THYST (Hysteresis) threshold.
