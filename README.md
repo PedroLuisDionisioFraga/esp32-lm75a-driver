@@ -111,6 +111,153 @@ To read the temperature:
 - Combine the bytes and shift right by 7 to get the 9-bit value.
 - Multiply by 0.5 to get the temperature in Celsius.
 
+## Example of Usage
+```c
+#include <driver/gpio.h>
+#include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <stdio.h>
+
+#include "lm75a.h"
+
+static const char *TAG = "MAIN";
+
+/* ------------------------------------------------------------------
+ * Existing or newly introduced #defines in main
+ * Adjust these to match your board / wiring
+ * ------------------------------------------------------------------ */
+#define I2C_MASTER_SDA_IO  21
+#define I2C_MASTER_SCL_IO  22
+#define I2C_MASTER_FREQ_HZ 400000
+#define LM75A_I2C_ADDR     0x48
+#define LM75A_OS_PIN       23
+
+static volatile uint8_t interrupt_count = 0;
+static volatile uint8_t last_counter = 0;
+
+// OS interrupt handler
+static void os_interrupt_handler(void *arg)
+{
+  // Toggle LED (example on GPIO2)
+  gpio_set_level(GPIO_NUM_2, !gpio_get_level(GPIO_NUM_2));
+  // Increment interrupt counter
+  interrupt_count++;
+}
+
+void app_main(void)
+{
+  // Configure an LED as output on GPIO2 (example)
+  gpio_config_t led_conf = {.pin_bit_mask = (1ULL << GPIO_NUM_2),
+                            .mode = GPIO_MODE_OUTPUT,
+                            .pull_up_en = GPIO_PULLUP_DISABLE,
+                            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                            .intr_type = GPIO_INTR_DISABLE};
+  gpio_config(&led_conf);
+
+  // 1) Simplified LM75A init if you have a function like this
+  lm75a_t *lm75a = lm75a_create((lm75a_config_t){
+    .i2c_port = I2C_NUM_0,
+    .master_sda_pin = I2C_MASTER_SDA_IO,
+    .master_scl_pin = I2C_MASTER_SCL_IO,
+    .os_pin = LM75A_OS_PIN,
+    .i2c_frequency = I2C_MASTER_FREQ_HZ,
+    .address = LM75A_I2C_ADDR,
+  });
+
+  lm75a_status_t status;
+
+  status = lm75a->init(lm75a);
+  if (status != LM75A_OK)
+  {
+    ESP_LOGE(TAG, "Failed to initialize LM75A: %s", lm75a_status_to_string(status));
+    return;
+  }
+
+  // 2) Optional: set an interrupt on the OS pin
+  status = lm75a->set_os_interrupt(lm75a, os_interrupt_handler, NULL);
+  if (status != LM75A_OK)
+  {
+    ESP_LOGE(TAG, "Failed to set OS interrupt: %s", lm75a_status_to_string(status));
+    return;
+  }
+
+  // 3) Set THYST
+  status = lm75a->set_thys(lm75a, -26, true);
+  if (status != LM75A_OK)
+  {
+    ESP_LOGE(TAG, "Failed to set THYST: %s", lm75a_status_to_string(status));
+    return;
+  }
+
+  // 3.5) Read THYST
+  float thys;
+  status = lm75a->get_thys(lm75a, &thys);
+  if (status != LM75A_OK)
+  {
+    ESP_LOGE(TAG, "Failed to get THYST: %s", lm75a_status_to_string(status));
+    return;
+  }
+  ESP_LOGI(TAG, "THYST: %.1f°C", thys);
+
+  // 4) Set TOS
+  status = lm75a->set_tos(lm75a, 14, false);
+  if (status != LM75A_OK)
+  {
+    ESP_LOGE(TAG, "Failed to set TOS: %s", lm75a_status_to_string(status));
+    return;
+  }
+
+  // 4.5) Read TOS
+  float tos;
+  status = lm75a->get_tos(lm75a, &tos);
+  if (status != LM75A_OK)
+  {
+    ESP_LOGE(TAG, "Failed to get TOS: %s", lm75a_status_to_string(status));
+    return;
+  }
+  ESP_LOGI(TAG, "TOS: %.1f°C", tos);
+
+  // 5) Set OS mode
+  status = lm75a->set_os_mode(lm75a, LM75A_OS_INTERRUPT_MODE);
+  if (status != LM75A_OK)
+  {
+    ESP_LOGE(TAG, "Failed to set OS mode: %s", lm75a_status_to_string(status));
+    return;
+  }
+
+  // 5) Get and log product ID
+  // .
+  // .
+  // .
+
+  // 5) Main loop reading temperature
+  while (1)
+  {
+    float temperature;
+    status = lm75a->read_temperature(lm75a, &temperature, LM75A_SCALE_CELSIUS);
+    if (status != LM75A_OK)
+    {
+      ESP_LOGE(TAG, "Failed to read temperature: %s", lm75a_status_to_string(status));
+    }
+    else
+    {
+      ESP_LOGI(TAG, "Temp: %.2f°C | Interrupt Count: %d", temperature, interrupt_count);
+    }
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    if (interrupt_count > last_counter)
+    {
+      last_counter = interrupt_count;
+      ESP_LOGW(TAG, "Interrupt detected! Counter: %d", interrupt_count);
+      ESP_LOGW(TAG, "GPIO2: %d", gpio_get_level(GPIO_NUM_2));
+    }
+  }
+
+  // 7) Clean up (unreachable in this loop example)
+  lm75a_destroy(lm75a);
+}
+```
+
 
 ## Future Works
 - [ ] Test with negative temperature values, i.e., submit the sensor to a cold environment and verify if the measures (read_temperature) and the triggers ($T_{OS}$, $T_{HYST}$) are working properly.
