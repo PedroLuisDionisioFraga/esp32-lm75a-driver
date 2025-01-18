@@ -149,16 +149,17 @@ lm75a_status_t lm75a_read_temperature(lm75a_t *self, float *out_temp, lm75a_scal
 
 lm75a_status_t lm75a_set_shutdown(lm75a_t *self, bool enable)
 {
+  LM75A_CHECK_INSTANCE(self, LM75A_ERR_INVALID_PARAM);
+
   uint8_t buf[2] = {0};
   buf[0] = LM75A_CONF_REG;
   buf[1] = ((uint8_t)enable & 0x01) ? (LM75A_SHUTDOWN_BIT)
                                     : 0;  // (if not works, put the `<< 1` outside the parenthesis)
 
+  LM75A_CHECK_INSTANCE(s_lm75a_device, LM75A_ERR_DEV_HANDLE);
   esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
-  if (ret == ESP_OK)
-    ESP_LOGI(TAG, "Shutdown %s", enable ? "enabled" : "disabled");
-  else
-    ESP_LOGE(TAG, "Failed to set shutdown: %s", esp_err_to_name(ret));
+
+  return (ret == ESP_OK) ? LM75A_OK : LM75A_ERR_I2C_WRITE;
 }
 
 void lm75a_set_os_mode(lm75a_t *self, lm75a_os_mode_t mode)
