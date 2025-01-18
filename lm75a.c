@@ -127,8 +127,17 @@ lm75a_status_t lm75a_read_temperature(lm75a_t *self, float *out_temp, lm75a_scal
   // Verify if the temperature is negative
   float celsius;
   celsius = raw_temp * 0.5f;
+
   if (raw_temp & LM75A_SIGNAL_BIT)
-    celsius = -celsius;
+  {
+    raw_temp &= ~LM75A_SIGNAL_BIT;
+    DEBUG_PRINT_ERR("raw_temp: 0x%02X", raw_temp);
+    raw_temp ^= 0xFE;  // Not invert the last bit because it is a float value (0.5), i.e., is a
+                       // control bit, like nine bit for signal, for the float value and the
+                       // (Item 7.5.2 Temperature Data Format in datasheet)
+    DEBUG_PRINT_ERR("raw_temp: 0x%02X", raw_temp);
+    celsius = -(raw_temp * 0.5);
+  }
 
   switch (scale)
   {
@@ -211,7 +220,8 @@ lm75a_status_t lm75a_set_tos(lm75a_t *self, int16_t tos, bool add_half_degree)
   if (tos < 0)
   {
     tos = -tos;
-    buf[1] = (tos & 0xFF) | (1 << 7);
+    tos = ~tos;                        // Invert the value
+    buf[1] = (tos & 0xFF) | (1 << 7);  // Set the signal bit
   }
   else
     buf[1] = (tos & 0xFF);
@@ -232,10 +242,12 @@ lm75a_status_t lm75a_set_thys(lm75a_t *self, int16_t thys, bool add_half_degree)
   if (thys < 0)
   {
     thys = -thys;
-    buf[1] = (thys & 0xFF) | (1 << 7);
+    thys = ~thys;                       // Invert the value
+    buf[1] = (thys & 0xFF) | (1 << 7);  // Set the signal bit
   }
   else
     buf[1] = (thys & 0xFF);
+
   buf[2] = add_half_degree ? LM75A_HALF_DEGREE_MASK : 0x00;
 
   esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
@@ -260,16 +272,21 @@ lm75a_status_t lm75a_get_tos(lm75a_t *self, float *out_tos)
 
   uint16_t raw_tos = (buf[0] << 8) | buf[1];
   raw_tos >>= 7;
-  ESP_LOGW(TAG, "raw_tos: 0x%04X", raw_tos);
 
-  // If the least significant bit (LSB) of the temperature data, which represents 0.5°C, around up
-  // the number. It uses the 0x80 bit because D0–D6 is undefined.
+  // If the least significant bit (LSB) of the temperature data, which
+  // represents 0.5°C, around up the number. It uses the 0x80 bit because D0–D6
+  // is undefined.
   float tos;
   tos = raw_tos * 0.5;
 
   if (raw_tos & LM75A_SIGNAL_BIT)
   {
     raw_tos &= ~LM75A_SIGNAL_BIT;
+    DEBUG_PRINT_ERR("raw_tos: 0x%02X", raw_tos);
+    raw_tos ^= 0xFE;  // Not invert the last bit because it is a float value (0.5), i.e., is a
+                      // control bit, like nine bit for signal, for the float value and the
+                      // (Item 7.5.2 Temperature Data Format in datasheet)
+    DEBUG_PRINT_ERR("raw_tos: 0x%02X", raw_tos);
     tos = -(raw_tos * 0.5);
   }
 
@@ -296,15 +313,22 @@ lm75a_status_t lm75a_get_thys(lm75a_t *self, float *out_thys)
     return LM75A_ERR_I2C_READ;
 
   uint16_t raw_thys = (buf[0] << 8) | buf[1];
+
+  // If the least significant bit (LSB) of the temperature data, which
+  // represents 0.5°C, around up the number. It uses the 0x80 bit because D0–D6
+  // is undefined.
   raw_thys >>= 7;
-  // If the least significant bit (LSB) of the temperature data, which represents 0.5°C, around up
-  // the number. It uses the 0x80 bit because D0–D6 is undefined.
   float thys;
-  thys = raw_thys * 0.5;
+  thys = raw_thys * 0.5f;
 
   if (raw_thys & LM75A_SIGNAL_BIT)
   {
     raw_thys &= ~LM75A_SIGNAL_BIT;
+    DEBUG_PRINT_ERR("raw_thys: 0x%02X", raw_thys);
+    raw_thys ^= 0xFE;  // Not invert the last bit because it is a float value (0.5), i.e., is a
+                       // control bit, like nine bit for signal, for the float value and the
+                       // (Item 7.5.2 Temperature Data Format in datasheet)
+    DEBUG_PRINT_ERR("raw_thys: 0x%02X", raw_thys);
     thys = -(raw_thys * 0.5);
   }
 
