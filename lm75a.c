@@ -109,19 +109,19 @@ lm75a_status_t lm75a_read_temperature(lm75a_t *self, float *out_temp, lm75a_scal
   LM75A_CHECK_INSTANCE(out_temp, LM75A_ERR_INVALID_PARAM);
 
   uint8_t temp_reg = LM75A_TEMP_REG;
-  uint8_t data[2] = {0};
+  uint8_t buf[2] = {0};
 
   esp_err_t ret = i2c_master_transmit_receive(s_lm75a_device,
                                               &temp_reg,
                                               sizeof(temp_reg),
-                                              data,
-                                              sizeof(data),
+                                              buf,
+                                              sizeof(buf),
                                               LM75A_WAIT_READ_FOREVER);
   if (ret != ESP_OK)
     return LM75A_ERR_READ_TEMP;
 
-  // Process the temperature data (9-bit two's complement format)
-  int16_t raw_temp = (data[0] << 8) | data[1];
+  // Process the temperature buf (9-bit two's complement format)
+  int16_t raw_temp = (buf[0] << 8) | buf[1];
   raw_temp >>= 7;
 
   // Verify if the temperature is negative
