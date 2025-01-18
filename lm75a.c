@@ -200,22 +200,26 @@ lm75a_status_t lm75a_set_fault_queue(lm75a_t *self, lm75a_fault_queue_t fault_qu
   return (ret == ESP_OK) ? LM75A_OK : LM75A_ERR_I2C_WRITE;
 }
 
-void lm75a_set_tos(lm75a_t *self, int tos)
+lm75a_status_t lm75a_set_tos(lm75a_t *self, int16_t tos, bool add_half_degree)
 {
-  // DEV_NOT_INIT(self, NULL);
+  LM75A_CHECK_INSTANCE(self, LM75A_ERR_INVALID_PARAM);
 
-  (void)self;  // Unused because the struct not contains a `tos` field
+  DEBUG_PRINT_ERR("tos: 0x%02X", (uint8_t)tos);
 
-  uint8_t buf[2] = {0};
+  uint8_t buf[3] = {0};
   buf[0] = LM75A_TOS_REG;
-  buf[1] = tos & 0xFF;
-  //? If not works, change `buf` length to 3 and add `buf[2] = 0x00;`
+  if (tos < 0)
+  {
+    tos = -tos;
+    buf[1] = (tos & 0xFF) | (1 << 7);
+  }
+  else
+    buf[1] = (tos & 0xFF);
+
+  buf[2] = add_half_degree ? LM75A_HALF_DEGREE_MASK : 0x00;
 
   esp_err_t ret = i2c_master_transmit(s_lm75a_device, buf, sizeof(buf), LM75A_WAIT_READ_FOREVER);
-  if (ret == ESP_OK)
-    ESP_LOGI(TAG, "TOS set to %d°C", tos);
-  else
-    ESP_LOGE(TAG, "Failed to set TOS: %s", esp_err_to_name(ret));
+  return (ret == ESP_OK) ? LM75A_OK : LM75A_ERR_I2C_WRITE;
 }
 
 void lm75a_set_thys(lm75a_t *self, int thys)
