@@ -71,6 +71,8 @@ static i2c_master_dev_handle_t s_lm75a_device = NULL;
 //==================== I2C INITIALIZATION ====================//
 static esp_err_t i2c_master_init(lm75a_config_t *cfg)
 {
+  esp_err_t ret;
+
   i2c_master_bus_config_t bus_config = {
     .clk_source = I2C_CLK_SRC_DEFAULT,  // Clock source for I2C peripheral
     .i2c_port = cfg->i2c_port,
@@ -79,34 +81,26 @@ static esp_err_t i2c_master_init(lm75a_config_t *cfg)
     .glitch_ignore_cnt = DEFAULT_GLITCH_FILTER,  // Filter out short glitches (default 7)
     .flags.enable_internal_pullup = true,        // Enable internal pull-up resistors
   };
-
-  // TODO: Add a personalized error code to return
-  ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &s_i2c_bus));
+  ret = i2c_new_master_bus(&bus_config, &s_i2c_bus);
+  if (ret != ESP_OK)
+    return ret;
 
   i2c_device_config_t device_config = {
     .dev_addr_length = I2C_ADDR_BIT_LEN_7,  // 7-bit I2C address
     .device_address = cfg->address,
     .scl_speed_hz = cfg->i2c_frequency,
   };
-
-  // TODO: Add a personalized error code to return
-  ESP_ERROR_CHECK(i2c_master_bus_add_device(s_i2c_bus, &device_config, &s_lm75a_device));
+  ret = i2c_master_bus_add_device(s_i2c_bus, &device_config, &s_lm75a_device);
+  if (ret != ESP_OK)
+    return ret;
 
   return ESP_OK;
 }
 
-esp_err_t lm75a_init(lm75a_t *self)
+lm75a_status_t lm75a_init(lm75a_t *self)
 {
-  if (!self)
-    return ESP_ERR_INVALID_ARG;
-
-  ESP_LOGI(TAG, "Initializing LM75A...");
-  i2c_master_init(&self->config);
-
-  // Create a task to debug the interrupt
-  ESP_LOGI(TAG, "LM75A initialized.");
-
-  return ESP_OK;
+  LM75A_CHECK_INSTANCE(self, LM75A_ERR_INVALID_PARAM);
+  return (i2c_master_init(&self->config) != ESP_OK) ? LM75A_ERR_I2C_INIT : LM75A_OK;
 }
 
 float lm75a_read_temperature(lm75a_t *self)
