@@ -174,9 +174,11 @@ extern "C"
      * @param[in]  self         Pointer to driver instance.
      * @param[out] out_product  Where the product ID is stored.
      *
+     * @note B4 - B7 Product Identification Nibble. Always returns 0x0a to uniquely identify this part as the LM75A. B0 - B3 Die Revision Nibble. Returns 0x01 to uniquely identify the revision level as one
+     *
      * @return lm75a_status_t Custom driver status.
      */
-    lm75a_status_t (*get_product_id)(struct lm75a *self, int *out_product);
+    lm75a_status_t (*get_product_id)(struct lm75a *self, uint8_t *out_product);
 
     /**
      * @brief Register/enable OS pin interrupt.

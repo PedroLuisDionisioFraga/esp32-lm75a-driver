@@ -46,7 +46,7 @@
 
 #define LM75A_MASK_INVERT_HALF_DEGREE_BIT 0xFE  // Generic macro for ignoring the half-degree bit
 
-#define DEBUG 1
+#define DEBUG 0
 
 // Macros
 #define DEBUG_PRINT_ERR(fmt, ...)        \
@@ -337,12 +337,27 @@ lm75a_status_t lm75a_get_thys(lm75a_t *self, float *out_thys)
 }
 
 //! Not working yet
-lm75a_status_t lm75a_get_product_id(lm75a_t *self, int *out_product)
+lm75a_status_t lm75a_get_product_id(lm75a_t *self, uint8_t *out_product)
 {
-  // uint8_t product_id = 0;
-  // i2c_master_transmit_receive(s_lm75a_device, (uint8_t[]){LM75A_PROD_ID_REG}, 1, &product_id, 1,
-  // -1); return product_id;
-  return LM75A_ERR_UNKNOWN;
+  LM75A_CHECK_INSTANCE(self, LM75A_ERR_INVALID_PARAM);
+  uint8_t reg = LM75A_PROD_ID_REG;
+  uint8_t buf[1] = {0};  // single-byte buffer
+
+  esp_err_t ret = i2c_master_transmit_receive(s_lm75a_device,
+                                              &reg,
+                                              sizeof(reg),
+                                              buf,
+                                              sizeof(buf),  // now 1 byte
+                                              LM75A_WAIT_READ_FOREVER);
+
+  ESP_LOGW(TAG, "buf: 0x%02X", buf[0]);
+  ESP_LOGW(TAG, "raw_buf: 0x%p", buf);
+  if (ret != ESP_OK)
+    return LM75A_ERR_I2C_READ;
+
+  *out_product = buf[0];
+
+  return LM75A_OK;
 }
 
 lm75a_status_t lm75a_set_os_interrupt(lm75a_t *self, lm75a_os_cb_t cb, void *arg)
